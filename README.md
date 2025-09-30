@@ -40,7 +40,6 @@ rag-streamlit-assistant/
 ├── requirements.txt # Dependencies
 └── README.md
 
-
 ---
 
 ## Getting Started
