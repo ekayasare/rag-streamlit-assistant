@@ -1,0 +1,23 @@
+# core app
+streamlit>=1.33
+pillow>=10.0
+python-dotenv>=1.0
+
+# vector search + embeddings
+faiss-cpu>=1.7.4
+sentence-transformers>=2.6.1
+huggingface-hub>=0.22
+
+# LLM & RAG plumbing
+langchain>=0.2.0
+langchain-community>=0.2.0
+langchain-core>=0.2.0
+langchain-groq>=0.1.4
+langchain-huggingface>=0.0.3
+
+# PDF loading
+pypdf>=4.0
+
+# evaluation (RAGAS)
+datasets>=2.18
+ragas>=0.1.9
