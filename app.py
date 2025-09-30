@@ -1,63 +1,67 @@
-import streamlit as st
-from PIL import Image
 import os
-import shutil
+from PIL import Image
+import streamlit as st
 
-#  PAGE CONFIG 
-st.set_page_config(page_title="HOA Document Q&A", layout="wide")
+# -------------------------
+# PAGE CONFIG (generic)
+# -------------------------
+st.set_page_config(page_title="Document Q&A (Demo)", layout="wide")
 
-#  CUSTOM STYLING 
+# -------------------------
+# CUSTOM STYLING (neutral)
+# -------------------------
 st.markdown("""
-    <style>
-        /* Global background */
-        body {
-            background-color: #f5f5dc;
-        }
-        /* Main response box */
-        .response-box {
-            background-color: #f0f0f0;
-            padding: 1rem;
-            border-radius: 12px;
-            margin-top: 1rem;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-        }
-        /* Hide Streamlit footer & hamburger menu */
-        #MainMenu { visibility: hidden; }
-        footer { visibility: hidden; }
-    </style>
+<style>
+    body { background-color: #f5f5dc; }
+    .response-box {
+        background-color: #f0f0f0;
+        padding: 1rem;
+        border-radius: 12px;
+        margin-top: 1rem;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    }
+    #MainMenu, footer { visibility: hidden; }
+</style>
 """, unsafe_allow_html=True)
 
-#  LOGO 
-logo_path = os.path.join("assets", "logo.png")
+# -------------------------
+# OPTIONAL LOGO (neutral)
+# -------------------------
+logo_path = os.path.join("assets", "placeholder_logo.png")
 if os.path.exists(logo_path):
-    logo = Image.open(logo_path)
-    st.image(logo, width=80)
+    st.image(Image.open(logo_path), width=80)
 
-#  APP HEADER 
-st.markdown("## HOA Document Q&A Assistant")
-st.markdown("*Ask questions and get answers from your community documents.*")
+# -------------------------
+# APP HEADER (generic)
+# -------------------------
+st.markdown("## Document Q&A Assistant (Demo)")
+st.markdown("*Ask questions and get answers from your documents.*")
 
-#  FOLDER PATHS 
-UPLOADS_FOLDER = os.path.join("uploads_for_index")
-DATA_FOLDER = os.path.join("Pro_Election")
+# -------------------------
+# FOLDER PATHS (consistent with README)
+# -------------------------
+UPLOADS_FOLDER = "uploads_for_index"
+DATA_FOLDER = "data"
+INDEX_DIR = "faiss_index"
 
-#  SIDEBAR 
+# -------------------------
+# SIDEBAR
+# -------------------------
 st.sidebar.markdown("## Document Options")
 
 uploaded_files = st.sidebar.file_uploader(
-    "Upload additional PDFs", type="pdf", accept_multiple_files=True
+    "Upload PDFs (not stored in repo)", type="pdf", accept_multiple_files=True
 )
 
-# Save uploaded files
+# Save uploaded files at runtime
 if uploaded_files:
     os.makedirs(UPLOADS_FOLDER, exist_ok=True)
-    for uploaded_file in uploaded_files:
-        file_path = os.path.join(UPLOADS_FOLDER, uploaded_file.name)
-        with open(file_path, "wb") as f:
-            f.write(uploaded_file.getbuffer())
-    st.sidebar.success(f"{len(uploaded_files)} file(s) uploaded successfully.")
+    for f in uploaded_files:
+        with open(os.path.join(UPLOADS_FOLDER, f.name), "wb") as out:
+            out.write(f.getbuffer())
+    st.sidebar.success(f"{len(uploaded_files)} file(s) uploaded.")
 
-use_all_folders = st.sidebar.checkbox("Use all folders", value=True)
+use_all_folders = st.sidebar.checkbox("Use all folders in /data", value=True)
 
 folder_options = []
 if os.path.exists(DATA_FOLDER):
@@ -67,14 +71,18 @@ if os.path.exists(DATA_FOLDER):
     ]
 
 selected_folders = []
-if not use_all_folders:
+if not use_all_folders and folder_options:
     selected_folders = st.sidebar.multiselect(
-        "Select folders to include:",
+        "Select subfolders in /data to include:",
         folder_options,
-        default=folder_options[:1] if folder_options else []
+        default=folder_options[:1]
     )
 
-#  VECTOR STORE LOGIC 
+rebuild_requested = st.sidebar.button("Rebuild index")
+
+# -------------------------
+# RAG HELPERS (your public module)
+# -------------------------
 from simple_ragas import (
     load_data,
     create_vector_store,
@@ -84,47 +92,55 @@ from simple_ragas import (
     get_response
 )
 
-FAISS_INDEX_PATH = os.path.join("faiss_index")
-faiss_exists = os.path.exists(FAISS_INDEX_PATH) and os.listdir(FAISS_INDEX_PATH)
-needs_rebuild = bool(uploaded_files or not faiss_exists)
+# -------------------------
+# VECTOR STORE (build or load)
+# -------------------------
+index_exists = os.path.isdir(INDEX_DIR) and os.listdir(INDEX_DIR)
+needs_rebuild = bool(uploaded_files or not index_exists or rebuild_requested)
 
 docs = []
-vector_store = None # Prevent 'possibly unbound' error
+vector_store = None
+
 if needs_rebuild:
     with st.spinner("Processing documents..."):
-        if use_all_folders:
-            docs = load_data(all_folders=True)
-        else:
-            docs = load_data(all_folders=False, subfolders=selected_folders)
-
+        docs = load_data(
+            all_folders=use_all_folders,
+            subfolders=selected_folders if not use_all_folders else None,
+            data_dir=DATA_FOLDER,
+            uploads_dir=UPLOADS_FOLDER
+        )
         if not docs:
-            st.error("No documents found to process. Please check your folders or uploads.")
+            st.error("No documents found. Add PDFs to /data or upload via the sidebar.")
         else:
-            vector_store = create_vector_store(docs)
+            vector_store = create_vector_store(docs, index_dir=INDEX_DIR)
             if vector_store:
-                save_vector_store(vector_store)
+                save_vector_store(vector_store, index_dir=INDEX_DIR)
                 st.success("Vector store built and saved.")
             else:
                 st.error("Vector store creation failed.")
 else:
     with st.spinner("Loading existing vector store..."):
-        vector_store = load_vector_store()
+        vector_store = load_vector_store(index_dir=INDEX_DIR)
         if not vector_store:
-            st.error("Failed to load FAISS index. Please upload documents first.")
+            st.error("No index found. Please add documents and rebuild.")
             st.stop()
 
-#  LLM INSTANCE 
+# -------------------------
+# LLM INSTANCE (env-based)
+# -------------------------
 llm = get_llm_by_provider()
 if not llm:
-    st.error("Failed to load LLM. Check your GROQ_API_KEY.")
+    st.error("Failed to initialize the language model. Check your environment variables.")
     st.stop()
 
-#  MAIN INTERFACE 
+# -------------------------
+# MAIN INTERFACE
+# -------------------------
 st.markdown("---")
 st.markdown("### Ask a question")
 
-user_question = st.text_area("Ask a question", height=100)
-submit_clicked = st.button("Ask a question")
+user_question = st.text_area("Your question", height=100)
+submit_clicked = st.button("Ask")
 
 if submit_clicked:
     if not user_question.strip():
@@ -133,11 +149,13 @@ if submit_clicked:
         with st.spinner("Thinking..."):
             answer, contexts = get_response(llm, vector_store, user_question)
 
-        # Response section
         st.markdown("### Response")
         st.markdown(f"<div class='response-box'>{answer}</div>", unsafe_allow_html=True)
 
-        # Contexts
         st.markdown("### Contexts used")
-        for i, ctx in enumerate(contexts):
-            st.expander(f"Context {i+1}").markdown(ctx)
+        if contexts:
+            for i, ctx in enumerate(contexts):
+                with st.expander(f"Context {i+1}"):
+                    st.markdown(ctx)
+        else:
+            st.info("No contexts returned for this query.")
