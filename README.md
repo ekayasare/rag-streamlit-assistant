@@ -42,7 +42,6 @@ rag-streamlit-assistant/
 └── README.md
 
 ```
-```
 
 ---
 
