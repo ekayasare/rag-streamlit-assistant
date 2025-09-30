@@ -27,7 +27,7 @@ st.markdown("""
 # -------------------------
 # OPTIONAL LOGO (neutral)
 # -------------------------
-logo_path = os.path.join("assets", "placeholder_logo.png")
+logo_path = os.path.join("assets", "placeholder_logo.png")  # was assets/logo.png
 if os.path.exists(logo_path):
     st.image(Image.open(logo_path), width=80)
 
@@ -38,11 +38,11 @@ st.markdown("## Document Q&A Assistant (Demo)")
 st.markdown("*Ask questions and get answers from your documents.*")
 
 # -------------------------
-# FOLDER PATHS (consistent with README)
+# FOLDER PATHS (NDA-safe)
 # -------------------------
 UPLOADS_FOLDER = "uploads_for_index"
-DATA_FOLDER = "data"
-INDEX_DIR = "faiss_index"
+DATA_FOLDER = "data"                 # was Pro_Election
+FAISS_INDEX_PATH = "faiss_index"
 
 # -------------------------
 # SIDEBAR
@@ -50,16 +50,17 @@ INDEX_DIR = "faiss_index"
 st.sidebar.markdown("## Document Options")
 
 uploaded_files = st.sidebar.file_uploader(
-    "Upload PDFs (not stored in repo)", type="pdf", accept_multiple_files=True
+    "Upload additional PDFs", type="pdf", accept_multiple_files=True
 )
 
-# Save uploaded files at runtime
+# Save uploaded files
 if uploaded_files:
     os.makedirs(UPLOADS_FOLDER, exist_ok=True)
-    for f in uploaded_files:
-        with open(os.path.join(UPLOADS_FOLDER, f.name), "wb") as out:
-            out.write(f.getbuffer())
-    st.sidebar.success(f"{len(uploaded_files)} file(s) uploaded.")
+    for uploaded_file in uploaded_files:
+        file_path = os.path.join(UPLOADS_FOLDER, uploaded_file.name)
+        with open(file_path, "wb") as f:
+            f.write(uploaded_file.getbuffer())
+    st.sidebar.success(f"{len(uploaded_files)} file(s) uploaded successfully.")
 
 use_all_folders = st.sidebar.checkbox("Use all folders in /data", value=True)
 
@@ -73,15 +74,15 @@ if os.path.exists(DATA_FOLDER):
 selected_folders = []
 if not use_all_folders and folder_options:
     selected_folders = st.sidebar.multiselect(
-        "Select subfolders in /data to include:",
+        "Select folders to include:",
         folder_options,
-        default=folder_options[:1]
+        default=folder_options[:1] if folder_options else []
     )
 
-rebuild_requested = st.sidebar.button("Rebuild index")
+rebuild_index = st.sidebar.button("Rebuild index")
 
 # -------------------------
-# RAG HELPERS (your public module)
+# VECTOR STORE LOGIC
 # -------------------------
 from simple_ragas import (
     load_data,
@@ -92,37 +93,33 @@ from simple_ragas import (
     get_response
 )
 
-# -------------------------
-# VECTOR STORE (build or load)
-# -------------------------
-index_exists = os.path.isdir(INDEX_DIR) and os.listdir(INDEX_DIR)
-needs_rebuild = bool(uploaded_files or not index_exists or rebuild_requested)
+faiss_exists = os.path.exists(FAISS_INDEX_PATH) and os.listdir(FAISS_INDEX_PATH)
+needs_rebuild = bool(uploaded_files or not faiss_exists or rebuild_index)
 
 docs = []
-vector_store = None
+vector_store = None  # prevent 'possibly unbound' errors
 
 if needs_rebuild:
     with st.spinner("Processing documents..."):
-        docs = load_data(
-            all_folders=use_all_folders,
-            subfolders=selected_folders if not use_all_folders else None,
-            data_dir=DATA_FOLDER,
-            uploads_dir=UPLOADS_FOLDER
-        )
-        if not docs:
-            st.error("No documents found. Add PDFs to /data or upload via the sidebar.")
+        if use_all_folders:
+            docs = load_data(all_folders=True)
         else:
-            vector_store = create_vector_store(docs, index_dir=INDEX_DIR)
+            docs = load_data(all_folders=False, subfolders=selected_folders)
+
+        if not docs:
+            st.error("No documents found to process. Add PDFs to /data or upload via the sidebar.")
+        else:
+            vector_store = create_vector_store(docs)
             if vector_store:
-                save_vector_store(vector_store, index_dir=INDEX_DIR)
+                save_vector_store(vector_store)
                 st.success("Vector store built and saved.")
             else:
                 st.error("Vector store creation failed.")
 else:
     with st.spinner("Loading existing vector store..."):
-        vector_store = load_vector_store(index_dir=INDEX_DIR)
+        vector_store = load_vector_store()
         if not vector_store:
-            st.error("No index found. Please add documents and rebuild.")
+            st.error("Failed to load an existing index. Please add documents and rebuild.")
             st.stop()
 
 # -------------------------
@@ -149,9 +146,11 @@ if submit_clicked:
         with st.spinner("Thinking..."):
             answer, contexts = get_response(llm, vector_store, user_question)
 
+        # Response section
         st.markdown("### Response")
         st.markdown(f"<div class='response-box'>{answer}</div>", unsafe_allow_html=True)
 
+        # Contexts
         st.markdown("### Contexts used")
         if contexts:
             for i, ctx in enumerate(contexts):
