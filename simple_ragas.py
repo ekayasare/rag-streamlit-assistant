@@ -1,3 +1,4 @@
+# src/simple_ragas.py  (public / NDA-safe)
 import os
 import sys
 import logging
@@ -19,16 +20,18 @@ from langchain.prompts import PromptTemplate
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_groq import ChatGroq
 
-#  Config 
+# -----------------------------
+# Config / constants
+# -----------------------------
 load_dotenv()
 
-CONSTANTS_FILE_PATH = os.path.abspath(__file__)
-PROJECT_ROOT_DIRECTORY = os.path.dirname(CONSTANTS_FILE_PATH)
+_THIS_FILE = os.path.abspath(__file__)
+PROJECT_ROOT = os.path.dirname(_THIS_FILE)
 
-DEFAULT_DATA_FOLDER = "Pro_Election"
-APP_LOG_DIRECTORY = os.path.join(PROJECT_ROOT_DIRECTORY, "log")
-APP_LOG_FILE_PATH = os.path.join(APP_LOG_DIRECTORY, "app.log")
-VECTOR_STORE_FAISS_INDEX = os.path.join(PROJECT_ROOT_DIRECTORY, "faiss_index")
+DEFAULT_DATA_FOLDER = "data"  # was "Pro_Election"
+LOG_DIR = os.path.join(PROJECT_ROOT, "logs")
+LOG_FILE = os.path.join(LOG_DIR, "app.log")
+FAISS_DIR = os.path.join(PROJECT_ROOT, "faiss_index")
 
 LLM_PROVIDER = "groq"
 EMBEDDING_PROVIDER = "huggingface"
@@ -36,47 +39,53 @@ EMBEDDING_PROVIDER = "huggingface"
 GROQ_MODEL_ID = "llama-3.3-70b-versatile"
 HUGGINGFACE_EMBEDDING_MODEL_ID = "sentence-transformers/all-MiniLM-L6-v2"
 
-#  Paths / Logging 
-def path_in_data(*parts: str) -> str:
-    base = os.path.join(PROJECT_ROOT_DIRECTORY, DEFAULT_DATA_FOLDER)
+# -----------------------------
+# Paths / logging
+# -----------------------------
+def _path_in_data(*parts: str) -> str:
+    base = os.path.join(PROJECT_ROOT, DEFAULT_DATA_FOLDER)
     return os.path.join(base, *parts)
 
-def ensure_dirs():
-    os.makedirs(APP_LOG_DIRECTORY, exist_ok=True)
-    os.makedirs(VECTOR_STORE_FAISS_INDEX, exist_ok=True)
-    os.makedirs(path_in_data(), exist_ok=True)
+def _ensure_dirs():
+    os.makedirs(LOG_DIR, exist_ok=True)
+    os.makedirs(FAISS_DIR, exist_ok=True)
+    os.makedirs(_path_in_data(), exist_ok=True)
 
 def get_logger(filename: str):
-    ensure_dirs()
+    _ensure_dirs()
     root = logging.getLogger()
     if not root.handlers:
         logging.basicConfig(
             level=logging.INFO,
             format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
             handlers=[
-                logging.FileHandler(APP_LOG_FILE_PATH, encoding="utf-8"),
+                logging.FileHandler(LOG_FILE, encoding="utf-8"),
                 logging.StreamHandler(sys.stdout),
-            ]
+            ],
         )
     return logging.getLogger(os.path.basename(filename))
 
-#  Prompt 
+# -----------------------------
+# Prompt (concise, safe)
+# -----------------------------
 PROMPT = PromptTemplate(
     template=(
-        "Human: use the following pieces of context to provide a concise answer to the question at the end, "
-        "but use at least 150 words with detailed explanation. If you don't know the answer, say you don't know.\n"
-        "<context>\n{context}\n</context>\n"
+        "You are an assistant answering questions using only the provided context. "
+        "Cite facts concisely and be direct. If the answer is not in the context, say you don't know.\n\n"
+        "<context>\n{context}\n</context>\n\n"
         "Question: {question}\n\n"
-        "Assistant:"
+        "Answer:"
     ),
-    input_variables=["context", "question"]
+    input_variables=["context", "question"],
 )
 
-#  Load documents 
+# -----------------------------
+# Load documents
+# -----------------------------
 def load_all_pdfs_recursively() -> List[Document]:
     logger = get_logger(__file__)
     try:
-        base_dir = path_in_data()
+        base_dir = _path_in_data()
         if not os.path.isdir(base_dir):
             logger.error(f"Data folder not found: {base_dir}")
             return []
@@ -99,7 +108,7 @@ def load_all_pdfs_recursively() -> List[Document]:
         logger.info("Splitting documents (recursive)")
         return splitter.split_documents(docs)
     except Exception:
-        logger.error(f"Error occurred while loading all PDFs recursively - {tb.format_exc()}")
+        logger.error(f"Error occurred while loading PDFs - {tb.format_exc()}")
         return []
 
 def load_pdfs_from_subfolders(subfolders: List[str]) -> List[Document]:
@@ -107,7 +116,7 @@ def load_pdfs_from_subfolders(subfolders: List[str]) -> List[Document]:
     try:
         docs: List[Document] = []
         for sf in subfolders:
-            folder = path_in_data(sf)
+            folder = _path_in_data(sf)
             if not os.path.isdir(folder):
                 logger.warning(f"Skipping missing subfolder: {folder}")
                 continue
@@ -132,6 +141,7 @@ def load_pdfs_from_subfolders(subfolders: List[str]) -> List[Document]:
         return []
 
 def load_data(all_folders: bool = True, subfolders: Optional[List[str]] = None) -> List[Document]:
+    """Preserves your existing signature (used by app.py)."""
     logger = get_logger(__file__)
     try:
         if all_folders:
@@ -143,7 +153,9 @@ def load_data(all_folders: bool = True, subfolders: Optional[List[str]] = None) 
         logger.error(f"Error in load_data() - {tb.format_exc()}")
         return []
 
-#  Embeddings / LLM 
+# -----------------------------
+# Embeddings / LLM
+# -----------------------------
 def get_huggingface_embeddings():
     logger = get_logger(__file__)
     try:
@@ -157,44 +169,44 @@ def get_huggingface_embeddings():
         return None
 
 def get_embeddings_by_provider():
-    logger = get_logger(__file__)
     if EMBEDDING_PROVIDER.lower() == "huggingface":
         return get_huggingface_embeddings()
-    logger.error(f"Unknown embedding provider: {EMBEDDING_PROVIDER}")
+    get_logger(__file__).error(f"Unknown embedding provider: {EMBEDDING_PROVIDER}")
     return None
 
 def get_groq_llm():
     logger = get_logger(__file__)
     try:
         if not os.getenv("GROQ_API_KEY"):
-            logger.error("GROQ_API_KEY not found in environment variables")
+            logger.error("Required API key not found in environment")
             return None
         return ChatGroq(
             model=GROQ_MODEL_ID,
             temperature=0.1,
             max_tokens=512,
-            stop_sequences=None
+            stop_sequences=None,
         )
     except Exception:
         logger.error(f"Error creating Groq model - {tb.format_exc()}")
         return None
 
 def get_llm_by_provider():
-    logger = get_logger(__file__)
     if LLM_PROVIDER.lower() == "groq":
         return get_groq_llm()
-    logger.error(f"Unknown LLM provider: {LLM_PROVIDER}")
+    get_logger(__file__).error(f"Unknown LLM provider: {LLM_PROVIDER}")
     return None
 
-#  Vector store 
+# -----------------------------
+# Vector store
+# -----------------------------
 def create_vector_store(docs: List[Document]):
     logger = get_logger(__file__)
     try:
-        logger.info("Creating vector store documents")
         embeddings = get_embeddings_by_provider()
         if embeddings is None:
             logger.error("Embeddings instance is None. Cannot create vector store.")
             return None
+        logger.info("Creating FAISS vector store")
         return FAISS.from_documents(documents=docs, embedding=embeddings)
     except Exception:
         logger.error(f"Error creating vector store - {tb.format_exc()}")
@@ -203,7 +215,7 @@ def create_vector_store(docs: List[Document]):
 def save_vector_store(vector_store):
     logger = get_logger(__file__)
     try:
-        vector_store.save_local(VECTOR_STORE_FAISS_INDEX)
+        vector_store.save_local(FAISS_DIR)
         logger.info("Saved vector store to disk")
     except Exception:
         logger.error(f"Error saving vector store - {tb.format_exc()}")
@@ -215,19 +227,21 @@ def load_vector_store():
         if embeddings is None:
             logger.error("Embeddings instance is None. Cannot load vector store.")
             return None
-        if not os.path.isdir(VECTOR_STORE_FAISS_INDEX):
-            logger.error(f"FAISS folder not found: {VECTOR_STORE_FAISS_INDEX}")
+        if not os.path.isdir(FAISS_DIR):
+            logger.error(f"FAISS folder not found: {FAISS_DIR}")
             return None
         return FAISS.load_local(
-            VECTOR_STORE_FAISS_INDEX,
+            FAISS_DIR,
             embeddings,
-            allow_dangerous_deserialization=True
+            allow_dangerous_deserialization=True,
         )
     except Exception:
         logger.error(f"Error loading vector store - {tb.format_exc()}")
         return None
 
-#  QA chain 
+# -----------------------------
+# QA chain
+# -----------------------------
 def get_response(llm, vector_store_faiss, query: str):
     """
     Returns (answer, contexts) where contexts are strings tagged with short source hints.
@@ -236,7 +250,7 @@ def get_response(llm, vector_store_faiss, query: str):
     try:
         retriever = vector_store_faiss.as_retriever(
             search_type="mmr",
-            search_kwargs={"k": 6, "fetch_k": 24, "lambda_mult": 0.5}
+            search_kwargs={"k": 6, "fetch_k": 24, "lambda_mult": 0.5},
         )
         retrieved_docs = retriever.get_relevant_documents(query)
 
@@ -258,7 +272,9 @@ def get_response(llm, vector_store_faiss, query: str):
         logger.error(f"Error generating response - {tb.format_exc()}")
         return "", []
 
-#  RAGAS evaluation 
+# -----------------------------
+# RAGAS evaluation (optional)
+# -----------------------------
 def evaluate_with_ragas_batch(
     questions: List[str],
     answers: List[str],
@@ -301,12 +317,14 @@ def evaluate_with_ragas_batch(
         print(f"[RAGAS] evaluation failed: {e}")
         return None
 
-#  Main 
+# -----------------------------
+# Main (local demo only)
+# -----------------------------
 def main():
     # Phase 1: index
-    docs = load_data(all_folders=True)  # scans Pro_Election/ recursively
+    docs = load_data(all_folders=True)  # scans data/ recursively
     if not docs:
-        raise Exception("No documents loaded. Check your data folder.")
+        raise Exception("No documents loaded. Add PDFs under /data and try again.")
     vectorstore_created = create_vector_store(docs=docs)
     if not vectorstore_created:
         raise Exception("Failed to create vectorstore.")
@@ -322,8 +340,8 @@ def main():
         raise Exception(f"Failed to load LLM: {LLM_PROVIDER}")
     print(f"Using {LLM_PROVIDER} LLM with model: {GROQ_MODEL_ID}")
 
-    # Phase 3: single query (demo)
-    query = "What are some actions without a meeting according to Polk Bylaws?"
+    # Phase 3: single query (generic demo)
+    query = "Summarize the key policy notices in the documents."
     print("Query:\n", query)
     answer, contexts = get_response(llm, vector_store, query)
     if not answer:
@@ -335,10 +353,10 @@ def main():
         preview = c[:600] + ("..." if len(c) > 600 else "")
         print(f"\n--- Context {i} ---\n{preview}")
 
-    # Phase 4: RAGAS batch evaluation (example with 2 questions)
+    # Phase 4: RAGAS batch evaluation (generic placeholders)
     eval_questions = [
-        "What are some actions without a meeting according to Polk Bylaws?",
-        "When are HOA board election notices due?",
+        "Summarize the key policy notices in the documents.",
+        "What deadlines or timelines are mentioned?",
     ]
     eval_answers: List[str] = []
     eval_contexts: List[List[str]] = []
@@ -347,7 +365,6 @@ def main():
         eval_answers.append(a)
         eval_contexts.append(ctxs)
 
-    # If you have gold answers, put them here; else set to None
     gold_refs: Optional[List[str]] = None
     ragas_df = evaluate_with_ragas_batch(
         questions=eval_questions,
