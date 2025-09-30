@@ -24,21 +24,25 @@ The Document Q&A Assistant:
 - **Interface**: Streamlit for an intuitive web app front-end  
 
 ---
-
 ## Repository Structure
+
+```
 
 rag-streamlit-assistant/
 │
-├── app.py # Streamlit UI
-├── simple_ragas.py # Backend pipeline logic
+├── app.py              # Streamlit UI
+├── simple_ragas.py     # Backend pipeline logic
 ├── assets/
-│ └── placeholder_logo.png # Optional branding image
-├── data/ # Local PDFs (empty; do not commit real docs)
-├── uploads_for_index/ # Runtime uploads (gitignored)
-├── faiss_index/ # Vector store (gitignored)
-├── .env.example # Example environment file
-├── requirements.txt # Dependencies
+│   └── placeholder_logo.png   # Optional branding image
+├── data/               # Local PDFs (empty; do not commit real docs)
+├── uploads_for_index/  # Runtime uploads (gitignored)
+├── faiss_index/        # Vector store (gitignored)
+├── .env.example        # Example environment file
+├── requirements.txt    # Dependencies
 └── README.md
+
+```
+```
 
 ---
 
